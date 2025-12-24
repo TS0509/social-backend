@@ -1,67 +1,64 @@
 package handler
 
 import (
-	"net/http"
-
-	"social-backend/internal/middleware"
 	"social-backend/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
 type AuthHandler struct {
-	AuthService *service.AuthService
+	Service *service.AuthService
 }
 
-func NewAuthHandler(svc *service.AuthService) *AuthHandler {
-	return &AuthHandler{AuthService: svc}
+func NewAuthHandler(s *service.AuthService) *AuthHandler {
+	return &AuthHandler{Service: s}
 }
 
-type RegisterRequest struct {
-	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required,min=6"`
-}
-
-type LoginRequest struct {
-	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required"`
-}
-
+// POST /auth/register
 func (h *AuthHandler) Register(c *gin.Context) {
-	var req RegisterRequest
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	c.BindJSON(&req)
 
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+	err := h.Service.Register(req.Email, req.Password)
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-
-	if err := h.AuthService.Register(req.Email, req.Password); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "registered"})
+	c.JSON(200, gin.H{"message": "registered"})
 }
 
+// POST /auth/login
 func (h *AuthHandler) Login(c *gin.Context) {
-	var req LoginRequest
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
-		return
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
+	c.BindJSON(&req)
 
-	user, err := h.AuthService.Login(req.Email, req.Password)
+	resp, err := h.Service.Login(req.Email, req.Password)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
 
-	token, err := middleware.GenerateToken(user.ID)
+	c.JSON(200, resp)
+}
+
+// POST /auth/refresh
+func (h *AuthHandler) Refresh(c *gin.Context) {
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	c.BindJSON(&req)
+
+	newAccess, err := h.Service.Refresh(req.RefreshToken)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "token generation failed"})
+		c.JSON(401, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"token": token})
+	c.JSON(200, gin.H{"access_token": newAccess})
 }

@@ -21,26 +21,31 @@ func NewUserRepository() *UserRepository {
 func (UserRepository) Create(user *model.User) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-
 	return database.DB.WithContext(ctx).Create(user).Error
 }
 
 func (UserRepository) FindByEmail(email string) (*model.User, error) {
 	email = strings.ToLower(email)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
 	var user model.User
-	err := database.DB.WithContext(ctx).Where("email = ?", email).First(&user).Error
+	err := database.DB.Where("email = ?", email).First(&user).Error
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
+	return &user, err
+}
 
-	if err != nil {
-		return nil, err
+func (UserRepository) FindByID(id uint) (*model.User, error) {
+	var user model.User
+	err := database.DB.Where("id = ?", id).First(&user).Error
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
 	}
+	return &user, err
+}
 
-	return &user, nil
+func (UserRepository) Update(user *model.User) error {
+	return database.DB.Save(user).Error
 }

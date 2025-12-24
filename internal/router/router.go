@@ -12,25 +12,52 @@ func SetupRouter() *gin.Engine {
 	r := gin.Default()
 	r.Use(gin.Recovery())
 
+	// --------------------------------------------------
+	// Health check
+	// --------------------------------------------------
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
+	// --------------------------------------------------
+	// Services
+	// --------------------------------------------------
 	authService := service.NewAuthService()
-	authHandler := handler.NewAuthHandler(authService)
+	userService := service.NewUserService()
 
+	// --------------------------------------------------
+	// Handlers
+	// --------------------------------------------------
+	authHandler := handler.NewAuthHandler(authService)
+	userHandler := handler.NewUserHandler(userService)
+
+	// --------------------------------------------------
+	// Auth Routes
+	// --------------------------------------------------
 	auth := r.Group("/auth")
 	{
 		auth.POST("/register", authHandler.Register)
 		auth.POST("/login", authHandler.Login)
+		auth.POST("/refresh", authHandler.Refresh)
 	}
 
-	protected := r.Group("/api")
-	protected.Use(middleware.AuthMiddleware())
+	// --------------------------------------------------
+	// Protected User Routes (Auth Required)
+	// --------------------------------------------------
+	api := r.Group("/api")
+	api.Use(middleware.AuthMiddleware())
 	{
-		protected.GET("/profile", func(c *gin.Context) {
-			c.JSON(200, gin.H{"message": "You are authenticated"})
-		})
+		api.GET("/profile", userHandler.Profile)
+		api.PUT("/profile", userHandler.Update)
+	}
+
+	// --------------------------------------------------
+	// Admin Routes (Auth + AdminOnly)
+	// --------------------------------------------------
+	admin := r.Group("/admin")
+	admin.Use(middleware.AuthMiddleware(), middleware.AdminOnly())
+	{
+		admin.GET("/stats", handler.AdminStats)
 	}
 
 	return r
