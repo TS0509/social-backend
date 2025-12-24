@@ -2,33 +2,39 @@ package middleware
 
 import (
 	"net/http"
-	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		tokenString := c.GetHeader("Authorization")
+		authHeader := c.GetHeader("Authorization")
 
-		if tokenString == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing token"})
+		if authHeader == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing Authorization header"})
 			c.Abort()
 			return
 		}
 
-		secret := os.Getenv("JWT_SECRET")
-
-		token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
-			return []byte(secret), nil
-		})
-
-		if err != nil || !token.Valid {
-			c.JSON(401, gin.H{"error": "invalid token"})
+		parts := strings.Split(authHeader, " ")
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid Authorization format"})
 			c.Abort()
 			return
 		}
+
+		tokenStr := parts[1]
+
+		_, claims, err := ParseTokenSecure(tokenStr)
+		if err != nil {
+			c.JSON(401, gin.H{"error": err.Error()})
+			c.Abort()
+			return
+		}
+
+		userID := uint(claims["user_id"].(float64))
+		c.Set("user_id", userID)
 
 		c.Next()
 	}

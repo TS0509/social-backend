@@ -3,50 +3,96 @@ package database
 import (
 	"crypto/tls"
 	"crypto/x509"
-	"io/ioutil"
+	"fmt"
 	"log"
-	"social-backend/internal/config"
+	"os"
+	"strings"
+	"time"
 
-	mysqlDriver "github.com/go-sql-driver/mysql"
+	gomysql "github.com/go-sql-driver/mysql"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+
+	"social-backend/internal/config"
+	"social-backend/internal/model"
 )
 
 var DB *gorm.DB
 
+// ===== TLS for Aiven =====
 func loadAivenTLS() {
 	rootCertPool := x509.NewCertPool()
 
-	// Load CA file
-	pem, err := ioutil.ReadFile("ca.pem")
+	pem, err := os.ReadFile("ca.pem")
 	if err != nil {
-		log.Fatalf("❌ Unable to load Aiven CA certificate: %v", err)
+		log.Fatalf("❌ 无法读取 CA 文件: %v", err)
 	}
 
 	if ok := rootCertPool.AppendCertsFromPEM(pem); !ok {
-		log.Fatal("❌ Failed to append Aiven PEM certificate.")
+		log.Fatal("❌ 无法加载 CA PEM")
 	}
 
-	// Register TLS config
-	err = mysqlDriver.RegisterTLSConfig("aiven", &tls.Config{
-		RootCAs:            rootCertPool,
-		InsecureSkipVerify: false,
+	err = gomysql.RegisterTLSConfig("aiven", &tls.Config{
+		RootCAs:    rootCertPool,
+		MinVersion: tls.VersionTLS12,
 	})
 	if err != nil {
-		log.Fatalf("❌ TLS Registration failed: %v", err)
+		log.Fatalf("❌ 注册 TLS 配置失败: %v", err)
 	}
+
+	log.Println("🔐 TLS 配置 'aiven' 已成功注册")
 }
 
 func InitMySQL() {
+	if config.Cfg == nil {
+		log.Fatal("❌ config 未加载")
+	}
+
 	loadAivenTLS()
 
-	log.Println("🔐 Using DSN:", config.Cfg.MysqlDSN)
+	dsn := config.Cfg.MysqlDSN
 
-	db, err := gorm.Open(mysql.Open(config.Cfg.MysqlDSN), &gorm.Config{})
+	// 自动加入 tls=aiven
+	if !strings.Contains(dsn, "tls=") {
+		if strings.Contains(dsn, "?") {
+			dsn += "&tls=aiven"
+		} else {
+			dsn += "?tls=aiven"
+		}
+	}
+
+	log.Printf("🔍 连接 MySQL: %s\n", maskPassword(dsn))
+
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
-		log.Fatalf("❌ MySQL connection failed: %v", err)
+		log.Fatalf("❌ MySQL 连接失败: %v", err)
+	}
+
+	sqlDB, _ := db.DB()
+	sqlDB.SetMaxIdleConns(10)
+	sqlDB.SetMaxOpenConns(100)
+	sqlDB.SetConnMaxLifetime(time.Hour)
+
+	// ⭐ 自动创建 users 表
+	if err := db.AutoMigrate(&model.User{}); err != nil {
+		log.Fatalf("❌ AutoMigrate 失败: %v", err)
 	}
 
 	DB = db
-	log.Println("✅ MySQL connected (Aiven Cloud)")
+	log.Println("✅ MySQL 连接成功，User 表已同步")
+}
+
+// 隐藏密码
+func maskPassword(dsn string) string {
+	parts := strings.Split(dsn, "@")
+	if len(parts) != 2 {
+		return dsn
+	}
+
+	cred := strings.Split(parts[0], ":")
+	if len(cred) < 2 {
+		return dsn
+	}
+
+	return fmt.Sprintf("%s:****@%s", cred[0], parts[1])
 }
